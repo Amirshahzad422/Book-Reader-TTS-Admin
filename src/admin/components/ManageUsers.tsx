@@ -3,6 +3,18 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { adminAuth } from "./../utils/adminAuth";
+import {
+  Users,
+  Gift,
+  Crown,
+  TrendingUp,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Calendar,
+  BarChart3,
+  LineChart,
+} from "lucide-react";
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -38,9 +50,8 @@ const ITEMS_PER_PAGE = 20;
 
 export const ManageUsers: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]); // Store all users for stats
   const [loading, setLoading] = useState(true);
-  const [hasMore, setHasMore] = useState(true);
-  const [page, setPage] = useState(0);
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<User>>({});
   const [filters, setFilters] = useState<Filters>({
@@ -52,109 +63,141 @@ export const ManageUsers: React.FC = () => {
     subscriptionId: "",
   });
 
-  const observerTarget = useRef<HTMLDivElement>(null);
   const adminUser = adminAuth.getSession();
 
   // Fetch users with filters and pagination
-  const fetchUsers = useCallback(
-    async (pageNum: number, isNewSearch: boolean = false) => {
-      try {
-        setLoading(true);
+  const fetchUsers = useCallback(async () => {
+    try {
+      setLoading(true);
 
-        let query = supabase
-          .from("users")
-          .select("*", { count: "exact" })
-          .order("created_at", { ascending: false })
-          .range(pageNum * ITEMS_PER_PAGE, (pageNum + 1) * ITEMS_PER_PAGE - 1);
+      // Fetch ALL users without pagination
+      const { data, error } = await supabase
+        .from("users")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      if (data) {
+        setAllUsers(data); // Store all users for stats calculation
+
+        // Apply filters to get filtered users
+        let filteredData = data;
 
         // Apply search filter
         if (filters.search) {
-          query = query.or(
-            `name.ilike.%${filters.search}%,email.ilike.%${filters.search}%,subscription_id.ilike.%${filters.search}%`
+          const searchLower = filters.search.toLowerCase();
+          filteredData = filteredData.filter(
+            (user) =>
+              user.name?.toLowerCase().includes(searchLower) ||
+              user.email?.toLowerCase().includes(searchLower) ||
+              user.subscription_id?.toLowerCase().includes(searchLower)
           );
         }
 
         // Apply subscription ID filter
         if (filters.subscriptionId) {
-          query = query.ilike("subscription_id", `%${filters.subscriptionId}%`);
+          const subIdLower = filters.subscriptionId.toLowerCase();
+          filteredData = filteredData.filter((user) =>
+            user.subscription_id?.toLowerCase().includes(subIdLower)
+          );
         }
 
         // Apply subscription plan filter
         if (filters.subscriptionPlan !== "all") {
-          query = query.eq("subscription_plan", filters.subscriptionPlan);
+          filteredData = filteredData.filter(
+            (user) => user.subscription_plan === filters.subscriptionPlan
+          );
         }
 
         // Apply conversions filter
         if (filters.conversionsMin) {
-          query = query.gte("conversions", parseInt(filters.conversionsMin));
+          filteredData = filteredData.filter(
+            (user) => user.conversions >= parseInt(filters.conversionsMin)
+          );
         }
         if (filters.conversionsMax) {
-          query = query.lte("conversions", parseInt(filters.conversionsMax));
+          filteredData = filteredData.filter(
+            (user) => user.conversions <= parseInt(filters.conversionsMax)
+          );
         }
 
-        const { data, error, count } = await query;
-
-        if (error) throw error;
-
-        if (data) {
-          // Apply expiry status filter (client-side since it's computed)
-          let filteredData = data;
-          if (filters.expiryStatus !== "all") {
-            filteredData = data.filter((user) => {
-              const status = getExpiryStatus(user.expiry_date);
-              return status === filters.expiryStatus;
-            });
-          }
-
-          if (isNewSearch) {
-            setUsers(filteredData);
-          } else {
-            setUsers((prev) => [...prev, ...filteredData]);
-          }
-
-          setHasMore(data.length === ITEMS_PER_PAGE);
+        // Apply expiry status filter
+        if (filters.expiryStatus !== "all") {
+          filteredData = filteredData.filter((user) => {
+            const status = getExpiryStatus(user.expiry_date);
+            return status === filters.expiryStatus;
+          });
         }
-      } catch (error) {
-        console.error("Error fetching users:", error);
-      } finally {
-        setLoading(false);
+
+        setUsers(filteredData);
       }
-    },
-    [filters]
-  );
-
-  // Initial load and filter changes
-  useEffect(() => {
-    setPage(0);
-    setUsers([]);
-    setHasMore(true);
-    fetchUsers(0, true);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+    } finally {
+      setLoading(false);
+    }
   }, [filters]);
 
-  // Infinite scroll observer
+  // Initial load
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loading) {
-          const nextPage = page + 1;
-          setPage(nextPage);
-          fetchUsers(nextPage);
-        }
-      },
-      { threshold: 0.1 }
-    );
+    fetchUsers();
+  }, []);
 
-    const currentTarget = observerTarget.current;
-    if (currentTarget) {
-      observer.observe(currentTarget);
-    }
+  // Re-filter when filters change
+  useEffect(() => {
+    if (allUsers.length > 0) {
+      let filteredData = allUsers;
 
-    return () => {
-      if (currentTarget) {
-        observer.unobserve(currentTarget);
+      // Apply search filter
+      if (filters.search) {
+        const searchLower = filters.search.toLowerCase();
+        filteredData = filteredData.filter(
+          (user) =>
+            user.name?.toLowerCase().includes(searchLower) ||
+            user.email?.toLowerCase().includes(searchLower) ||
+            user.subscription_id?.toLowerCase().includes(searchLower)
+        );
       }
-    };
-  }, [hasMore, loading, page, fetchUsers]);
+
+      // Apply subscription ID filter
+      if (filters.subscriptionId) {
+        const subIdLower = filters.subscriptionId.toLowerCase();
+        filteredData = filteredData.filter((user) =>
+          user.subscription_id?.toLowerCase().includes(subIdLower)
+        );
+      }
+
+      // Apply subscription plan filter
+      if (filters.subscriptionPlan !== "all") {
+        filteredData = filteredData.filter(
+          (user) => user.subscription_plan === filters.subscriptionPlan
+        );
+      }
+
+      // Apply conversions filter
+      if (filters.conversionsMin) {
+        filteredData = filteredData.filter(
+          (user) => user.conversions >= parseInt(filters.conversionsMin)
+        );
+      }
+      if (filters.conversionsMax) {
+        filteredData = filteredData.filter(
+          (user) => user.conversions <= parseInt(filters.conversionsMax)
+        );
+      }
+
+      // Apply expiry status filter
+      if (filters.expiryStatus !== "all") {
+        filteredData = filteredData.filter((user) => {
+          const status = getExpiryStatus(user.expiry_date);
+          return status === filters.expiryStatus;
+        });
+      }
+
+      setUsers(filteredData);
+    }
+  }, [filters, allUsers]);
 
   // Get expiry status
   const getExpiryStatus = (expiryDate: string): ExpiryStatus => {
@@ -192,6 +235,84 @@ export const ManageUsers: React.FC = () => {
       </span>
     );
   };
+
+  // Calculate stats based on filtered users
+  const calculateStats = () => {
+    const total = users.length;
+    const freeUsers = users.filter(
+      (u) => u.subscription_plan === "free"
+    ).length;
+    const paidUsers = users.filter(
+      (u) => u.subscription_plan === "paid"
+    ).length;
+
+    const active = users.filter(
+      (u) => getExpiryStatus(u.expiry_date) === "active"
+    ).length;
+    const expiringSoon = users.filter(
+      (u) => getExpiryStatus(u.expiry_date) === "expiring_soon"
+    ).length;
+    const expired = users.filter(
+      (u) => getExpiryStatus(u.expiry_date) === "expired"
+    ).length;
+
+    // Time-based stats
+    const now = new Date();
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+    const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      0,
+      23,
+      59,
+      59
+    );
+
+    const newToday = users.filter(
+      (u) => new Date(u.created_at) >= todayStart
+    ).length;
+    const newThisWeek = users.filter(
+      (u) => new Date(u.created_at) >= weekStart
+    ).length;
+    const newThisMonth = users.filter(
+      (u) => new Date(u.created_at) >= monthStart
+    ).length;
+    const newLastMonth = users.filter(
+      (u) =>
+        new Date(u.created_at) >= lastMonthStart &&
+        new Date(u.created_at) <= lastMonthEnd
+    ).length;
+
+    // Calculate percentage change
+    const monthlyGrowth =
+      newLastMonth > 0
+        ? (((newThisMonth - newLastMonth) / newLastMonth) * 100).toFixed(1)
+        : newThisMonth > 0
+        ? "100"
+        : "0";
+
+    return {
+      total,
+      freeUsers,
+      paidUsers,
+      active,
+      expiringSoon,
+      expired,
+      newToday,
+      newThisWeek,
+      newThisMonth,
+      monthlyGrowth: parseFloat(monthlyGrowth),
+    };
+  };
+
+  const stats = calculateStats();
 
   // Handle edit
   const handleEdit = (user: User) => {
@@ -271,7 +392,222 @@ export const ManageUsers: React.FC = () => {
           </div>
         </div>
       </div>
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-0">
+        {/* Stats Dashboard */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
+          {/* Total Users */}
+          <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/10 rounded-2xl border-2 border-blue-500/20 p-6 hover:border-blue-500/40 transition-all hover:shadow-lg">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                Total Users
+              </h3>
+              <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                <Users className="text-blue-600 w-5 h-5" />
+              </div>
+            </div>
+            <p className="text-3xl font-bold text-foreground mb-1">
+              {stats.total}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {stats.newThisMonth} new users this month
+            </p>
+          </div>
 
+          {/* Free Users */}
+          <div className="bg-gradient-to-br from-green-500/10 to-green-600/10 rounded-2xl border-2 border-green-500/20 p-6 hover:border-green-500/40 transition-all hover:shadow-lg">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                Free Plan
+              </h3>
+              <div className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center">
+                <Gift className="text-green-600 w-5 h-5" />
+              </div>
+            </div>
+            <p className="text-3xl font-bold text-foreground mb-1">
+              {stats.freeUsers}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {stats.total > 0
+                ? ((stats.freeUsers / stats.total) * 100).toFixed(1)
+                : 0}
+              % of total
+            </p>
+          </div>
+
+          {/* Paid Users */}
+          <div className="bg-gradient-to-br from-purple-500/10 to-purple-600/10 rounded-2xl border-2 border-purple-500/20 p-6 hover:border-purple-500/40 transition-all hover:shadow-lg">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                Paid Plan
+              </h3>
+              <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
+                <Crown className="text-purple-600 w-5 h-5" />
+              </div>
+            </div>
+            <p className="text-3xl font-bold text-foreground mb-1">
+              {stats.paidUsers}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {stats.total > 0
+                ? ((stats.paidUsers / stats.total) * 100).toFixed(1)
+                : 0}
+              % of total
+            </p>
+          </div>
+
+          {/* Monthly Growth */}
+          <div className="bg-gradient-to-br from-orange-500/10 to-orange-600/10 rounded-2xl border-2 border-orange-500/20 p-6 hover:border-orange-500/40 transition-all hover:shadow-lg">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                Monthly Growth
+              </h3>
+              <div className="w-10 h-10 bg-orange-500/20 rounded-lg flex items-center justify-center">
+                <TrendingUp className="text-orange-600 w-5 h-5" />
+              </div>
+            </div>
+            <p className="text-3xl font-bold text-foreground mb-1">
+              {stats.monthlyGrowth > 0 ? "+" : ""}
+              {stats.monthlyGrowth}%
+            </p>
+            <p className="text-xs text-muted-foreground">vs last month</p>
+          </div>
+        </div>
+
+        {/* Subscription Status Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
+          {/* Active Subscriptions */}
+          <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/10 rounded-2xl border-2 border-emerald-500/20 p-6 hover:border-emerald-500/40 transition-all hover:shadow-lg">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                Active
+              </h3>
+              <span className="px-3 py-1 bg-emerald-500/20 text-emerald-600 rounded-full text-xs font-bold flex items-center gap-1">
+                <CheckCircle2 className="text-emarald-600 w-4 h-4" />
+                HEALTHY
+              </span>
+            </div>
+            <p className="text-4xl font-bold text-foreground mb-2">
+              {stats.active}
+            </p>
+            <div className="h-2 bg-emerald-500/20 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600 transition-all duration-500"
+                style={{
+                  width:
+                    stats.total > 0
+                      ? `${(stats.active / stats.total) * 100}%`
+                      : "0%",
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              {stats.total > 0
+                ? ((stats.active / stats.total) * 100).toFixed(1)
+                : 0}
+              % of users
+            </p>
+          </div>
+
+          {/* Expiring Soon */}
+          <div className="bg-gradient-to-br from-yellow-500/10 to-yellow-600/10 rounded-2xl border-2 border-yellow-500/20 p-6 hover:border-yellow-500/40 transition-all hover:shadow-lg">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                Expiring Soon
+              </h3>
+              <span className="px-3 py-1 bg-yellow-500/20 text-yellow-600 rounded-full text-xs font-bold flex items-center gap-1">
+                <AlertTriangle className="text-yellow-600 w-4 h-4" /> WARNING
+              </span>
+            </div>
+            <p className="text-4xl font-bold text-foreground mb-2">
+              {stats.expiringSoon}
+            </p>
+            <div className="h-2 bg-yellow-500/20 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-yellow-500 to-yellow-600 transition-all duration-500"
+                style={{
+                  width:
+                    stats.total > 0
+                      ? `${(stats.expiringSoon / stats.total) * 100}%`
+                      : "0%",
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">Within 7 days</p>
+          </div>
+
+          {/* Expired */}
+          <div className="bg-gradient-to-br from-red-500/10 to-red-600/10 rounded-2xl border-2 border-red-500/20 p-6 hover:border-red-500/40 transition-all hover:shadow-lg">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                Expired
+              </h3>
+              <span className="px-3 py-1 bg-red-500/20 text-red-600 rounded-full text-xs font-bold">
+                ✗ INACTIVE
+              </span>
+            </div>
+            <p className="text-4xl font-bold text-foreground mb-2">
+              {stats.expired}
+            </p>
+            <div className="h-2 bg-red-500/20 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-red-500 to-red-600 transition-all duration-500"
+                style={{
+                  width:
+                    stats.total > 0
+                      ? `${(stats.expired / stats.total) * 100}%`
+                      : "0%",
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Needs attention
+            </p>
+          </div>
+        </div>
+
+        {/* Time-based Stats */}
+        <div className="bg-gradient-to-br from-indigo-500/5 to-purple-500/5 rounded-2xl border-2 border-indigo-500/20 p-6 mb-6 sm:mb-8 hover:border-indigo-500/40 transition-all">
+          <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+            <span className="w-1 h-6 bg-gradient-to-b from-indigo-500 to-purple-600 rounded-full"></span>
+            New Users Overview
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-indigo-500/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                <Calendar className="text-indigo-600 w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-foreground">
+                  {stats.newToday}
+                </p>
+                <p className="text-sm text-muted-foreground">Today</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-purple-500/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                <BarChart3 className="text-purple-600 w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-foreground">
+                  {stats.newThisWeek}
+                </p>
+                <p className="text-sm text-muted-foreground">This Week</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-pink-500/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                <LineChart className="text-pink-600 w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-foreground">
+                  {stats.newThisMonth}
+                </p>
+                <p className="text-sm text-muted-foreground">This Month</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
       {/* Filters */}
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         <div className="bg-card rounded-2xl border-2 border-border shadow-lg p-6 sm:p-8 mb-6 sm:mb-8 hover:border-primary/50 transition-all">
@@ -593,14 +929,14 @@ export const ManageUsers: React.FC = () => {
             </div>
           )}
 
-          {/* Infinite scroll trigger */}
-          <div ref={observerTarget} className="h-10" />
-
-          {/* No more results */}
-          {!loading && !hasMore && users.length > 0 && (
-            <div className="text-center py-8 border-t border-border">
-              <p className="text-muted-foreground font-medium">
-                No more users to load
+          {/* No results */}
+          {!loading && users.length === 0 && (
+            <div className="text-center py-16">
+              <p className="text-muted-foreground text-lg font-medium">
+                No users found
+              </p>
+              <p className="text-muted-foreground text-sm mt-2">
+                Try adjusting your filters
               </p>
             </div>
           )}
