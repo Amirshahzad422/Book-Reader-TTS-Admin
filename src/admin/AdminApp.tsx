@@ -17,7 +17,7 @@ export const AdminApp: React.FC = () => {
   >("users");
 
   const handleLogout = () => {
-    adminAuth.logout();
+    //adminAuth.logout();
     setIsAuthenticated(false);
   };
 
